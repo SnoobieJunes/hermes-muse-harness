@@ -1,20 +1,29 @@
-"""Hermes plugin: one Muse Code turn over MSP, credential left inside muse."""
+"""Hermes plugin: one Muse Code turn over MSP. Credentials stay inside muse."""
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
-_PLUGIN_DIR = str(Path(__file__).resolve().parent)
-if _PLUGIN_DIR not in sys.path:
-    sys.path.insert(0, _PLUGIN_DIR)
-
-from client import MuseHarnessError, run_turn
-
 MAX_TIMEOUT_S = 1200
+
+
+def _load_client():
+    path = Path(__file__).resolve().parent / "client.py"
+    spec = importlib.util.spec_from_file_location("muse_harness_client", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_client = _load_client()
+MuseHarnessError = _client.MuseHarnessError
+run_turn = _client.run_turn
 
 
 def register(ctx) -> None:
@@ -22,11 +31,11 @@ def register(ctx) -> None:
         "name": "muse_turn",
         "description": (
             "Run one prompt inside the local Muse Code harness (muse serve / MSP). "
-            "Use this for Muse Wonder Full and for any turn that must spend the "
-            "Muse Code subscription. Muse keeps its own login; this tool never "
-            "reads it. Pass mcp_servers to let that session call Unreal or other "
-            "MCP tools during the turn. approval_mode defaults to denyUnmatched; "
-            "set allowAll only when Muse must run its own tools without a second prompt."
+            "Uses the Muse Code subscription first. If Muse reports the allowance "
+            "is exhausted and META_API_KEY or MODEL_API_KEY is set, retries that "
+            "one turn on pay-as-you-go. Does not read Muse login files. "
+            "mcp_servers may only be loopback HTTP. Muse tool approval is "
+            "denyUnmatched unless the user set MUSE_HARNESS_APPROVAL=allowAll."
         ),
         "parameters": {
             "type": "object",
@@ -38,19 +47,14 @@ def register(ctx) -> None:
                 },
                 "workspace": {
                     "type": "string",
-                    "description": "Absolute workspace root. Defaults to the session cwd.",
-                },
-                "approval_mode": {
-                    "type": "string",
-                    "enum": ["denyUnmatched", "onRequest", "allowAll"],
-                    "description": "Muse approval mode. Default denyUnmatched. allowAll is explicit.",
+                    "description": "Directory inside the session cwd. Defaults to the session cwd.",
                 },
                 "mcp_servers": {
                     "type": "string",
                     "description": (
-                        "JSON object of MCP servers for this session only. "
-                        "stdio: {\"transport\":\"stdio\",\"command\":\"bin\",\"args\":[]}. "
-                        "http: {\"transport\":\"streamableHttp\",\"url\":\"http://127.0.0.1:8000/mcp\"}."
+                        "JSON object of loopback MCP servers. "
+                        "Example: {\"unreal\":{\"transport\":\"streamableHttp\","
+                        "\"url\":\"http://127.0.0.1:8000/mcp\"}}."
                     ),
                 },
                 "timeout_s": {
@@ -65,8 +69,8 @@ def register(ctx) -> None:
     def handle(params: dict[str, Any], **kwargs: Any) -> str:
         del kwargs
         prompt = params.get("prompt") or ""
-        workspace = params.get("workspace") or _session_cwd()
-        approval = params.get("approval_mode") or "denyUnmatched"
+        session_cwd = _session_cwd()
+        workspace = params.get("workspace") or session_cwd
         timeout = params.get("timeout_s") or 600
         try:
             timeout_s = float(timeout)
@@ -74,11 +78,15 @@ def register(ctx) -> None:
             return _err("timeout_s must be a number")
         if timeout_s <= 0 or timeout_s > MAX_TIMEOUT_S:
             return _err(f"timeout_s must be between 1 and {MAX_TIMEOUT_S}")
+        approval = os.environ.get("MUSE_HARNESS_APPROVAL", "denyUnmatched")
+        if approval not in ("denyUnmatched", "allowAll"):
+            approval = "denyUnmatched"
         try:
             result = run_turn(
                 prompt=prompt,
                 model=params.get("model") or "muse-wonder-full-1.0",
                 workspace=workspace,
+                allowed_root=session_cwd,
                 approval_mode=approval,
                 mcp_servers=params.get("mcp_servers"),
                 timeout_s=timeout_s,
