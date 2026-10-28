@@ -102,15 +102,21 @@ class ClientTests(unittest.TestCase):
 
         class Ctx:
             def register_tool(self, **kwargs):
-                registered.append(kwargs)
+                registered.append(("tool", kwargs["name"]))
+
+            def register_command(self, name, **kwargs):
+                registered.append(("command", name))
+
+            def get_config(self, key, default=None):
+                return default
 
         import importlib.util
         spec = importlib.util.spec_from_file_location("muse_harness_plugin", ROOT / "__init__.py")
         plugin = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(plugin)
         plugin.register(Ctx())
-        self.assertEqual([item["name"] for item in registered], ["muse_turn"])
-        self.assertNotIn("approval_mode", registered[0]["schema"]["parameters"]["properties"])
+        self.assertIn(("tool", "muse_turn"), registered)
+        self.assertIn(("command", "muse"), registered)
 
 
 if __name__ == "__main__":

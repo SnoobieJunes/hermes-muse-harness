@@ -19,7 +19,11 @@ hermes plugins install SnoobieJunes/hermes-muse-harness
 hermes plugins enable muse-harness
 ```
 
-Requires `muse` on `PATH` and `muse login` already completed. Set `MUSE_HARNESS_APPROVAL=allowAll` in the Hermes environment if Muse must use its own tools. The model cannot set that.
+Requires `muse` on `PATH` and `muse login` already completed. Tool approval comes from `plugins.entries.muse-harness.settings.approval_mode`.
+
+## Slash command
+
+`/muse <prompt>` runs the same turn. `/muse` with no prompt prints the current approval mode.
 
 ## Tool
 

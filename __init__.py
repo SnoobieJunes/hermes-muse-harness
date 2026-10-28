@@ -78,27 +78,25 @@ def register(ctx) -> None:
             return _err("timeout_s must be a number")
         if timeout_s <= 0 or timeout_s > MAX_TIMEOUT_S:
             return _err(f"timeout_s must be between 1 and {MAX_TIMEOUT_S}")
-        approval = ctx.get_config("approval_mode", None)
-        if approval not in ("denyUnmatched", "allowAll"):
-            approval = os.environ.get("MUSE_HARNESS_APPROVAL", "denyUnmatched")
-        if approval not in ("denyUnmatched", "allowAll"):
-            approval = "denyUnmatched"
-        try:
-            result = run_turn(
-                prompt=prompt,
-                model=params.get("model") or "muse-wonder-full-1.0",
-                workspace=workspace,
-                allowed_root=session_cwd,
-                approval_mode=approval,
-                mcp_servers=params.get("mcp_servers"),
-                timeout_s=timeout_s,
-                contributor_mode="off",
+        return _execute(
+            ctx,
+            prompt,
+            model=params.get("model"),
+            workspace=workspace,
+            mcp_servers=params.get("mcp_servers"),
+            timeout_s=timeout_s,
+        )
+
+    def slash(raw_args: str) -> str:
+        text = (raw_args or "").strip()
+        if not text or text in {"help", "-h", "--help"}:
+            mode = _approval(ctx)
+            return (
+                "/muse <prompt>\n"
+                "Runs one Muse Code turn in this session directory.\n"
+                f"Tool approval: {mode}."
             )
-        except MuseHarnessError as exc:
-            return _err(str(exc))
-        except OSError as exc:
-            return _err(f"failed to start muse: {exc}")
-        return json.dumps({"success": True, **result})
+        return _execute(ctx, text)
 
     ctx.register_tool(
         name="muse_turn",
@@ -106,6 +104,48 @@ def register(ctx) -> None:
         schema=schema,
         handler=handle,
     )
+    ctx.register_command(
+        "muse",
+        handler=slash,
+        description="Run one prompt inside the local Muse Code harness.",
+    )
+
+
+def _approval(ctx) -> str:
+    approval = ctx.get_config("approval_mode", None)
+    if approval not in ("denyUnmatched", "allowAll"):
+        approval = os.environ.get("MUSE_HARNESS_APPROVAL", "denyUnmatched")
+    if approval not in ("denyUnmatched", "allowAll"):
+        return "denyUnmatched"
+    return approval
+
+
+def _execute(
+    ctx,
+    prompt: str,
+    *,
+    model: str | None = None,
+    workspace: str | None = None,
+    mcp_servers: Any = None,
+    timeout_s: float = 600,
+) -> str:
+    session_cwd = _session_cwd()
+    try:
+        result = run_turn(
+            prompt=prompt,
+            model=model or "muse-wonder-full-1.0",
+            workspace=workspace or session_cwd,
+            allowed_root=session_cwd,
+            approval_mode=_approval(ctx),
+            mcp_servers=mcp_servers,
+            timeout_s=timeout_s,
+            contributor_mode="off",
+        )
+    except MuseHarnessError as exc:
+        return _err(str(exc))
+    except OSError as exc:
+        return _err(f"failed to start muse: {exc}")
+    return json.dumps({"success": True, **result})
 
 
 def _session_cwd() -> str:
