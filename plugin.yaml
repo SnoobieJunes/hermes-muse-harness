@@ -1,7 +1,11 @@
 name: muse-harness
-version: 0.1.1
+version: 0.1.2
 description: Drive a local Muse Code session over MSP so Wonder Full can call MCP tools.
 author: Auston (SnoobieJunes)
 requires_hermes: ">=0.21.0"
 provides_tools:
   - muse_turn
+config_schema:
+  approval_mode:
+    type: str
+    description: Muse tool approval. allowAll lets the Muse session use its own tools.

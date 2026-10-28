@@ -35,7 +35,7 @@ def register(ctx) -> None:
             "is exhausted and META_API_KEY or MODEL_API_KEY is set, retries that "
             "one turn on pay-as-you-go. Does not read Muse login files. "
             "mcp_servers may only be loopback HTTP. Muse tool approval is "
-            "denyUnmatched unless the user set MUSE_HARNESS_APPROVAL=allowAll."
+            "denyUnmatched unless approval_mode is allowAll in plugin settings."
         ),
         "parameters": {
             "type": "object",
@@ -78,7 +78,9 @@ def register(ctx) -> None:
             return _err("timeout_s must be a number")
         if timeout_s <= 0 or timeout_s > MAX_TIMEOUT_S:
             return _err(f"timeout_s must be between 1 and {MAX_TIMEOUT_S}")
-        approval = os.environ.get("MUSE_HARNESS_APPROVAL", "denyUnmatched")
+        approval = ctx.get_config("approval_mode", None)
+        if approval not in ("denyUnmatched", "allowAll"):
+            approval = os.environ.get("MUSE_HARNESS_APPROVAL", "denyUnmatched")
         if approval not in ("denyUnmatched", "allowAll"):
             approval = "denyUnmatched"
         try:
