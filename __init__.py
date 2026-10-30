@@ -32,8 +32,9 @@ def register(ctx) -> None:
         "description": (
             "Run one prompt inside the local Muse Code harness (muse serve / MSP). "
             "Uses the Muse Code subscription first. If Muse reports the allowance "
-            "is exhausted and META_API_KEY or MODEL_API_KEY is set, retries that "
-            "one turn on pay-as-you-go. Does not read Muse login files. "
+            "is exhausted, retries that one turn on pay-as-you-go using the Meta "
+            "key from Hermes secrets (MODEL_API_KEY, then META_API_KEY, then "
+            "META_MODEL_API_KEY). Does not read Muse login files. "
             "mcp_servers may only be loopback HTTP. Muse tool approval is "
             "denyUnmatched unless approval_mode is allowAll in plugin settings."
         ),
@@ -114,8 +115,6 @@ def register(ctx) -> None:
 def _approval(ctx) -> str:
     approval = ctx.get_config("approval_mode", None)
     if approval not in ("denyUnmatched", "allowAll"):
-        approval = os.environ.get("MUSE_HARNESS_APPROVAL", "denyUnmatched")
-    if approval not in ("denyUnmatched", "allowAll"):
         return "denyUnmatched"
     return approval
 
@@ -140,12 +139,24 @@ def _execute(
             mcp_servers=mcp_servers,
             timeout_s=timeout_s,
             contributor_mode="off",
+            api_key_provider=_scoped_api_key,
         )
     except MuseHarnessError as exc:
         return _err(str(exc))
     except OSError as exc:
         return _err(f"failed to start muse: {exc}")
     return json.dumps({"success": True, **result})
+
+
+def _scoped_api_key() -> str | None:
+    try:
+        from agent.secret_scope import UnscopedSecretError, get_secret
+    except ImportError as exc:
+        raise MuseHarnessError("Hermes secret scope is unavailable") from exc
+    try:
+        return _client.resolve_api_key(get_secret)
+    except UnscopedSecretError as exc:
+        raise MuseHarnessError("could not read the Meta API key for this profile") from exc
 
 
 def _session_cwd() -> str:

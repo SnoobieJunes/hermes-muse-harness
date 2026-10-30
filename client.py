@@ -22,6 +22,8 @@ from urllib.parse import urlparse
 API_KEY_ENV = ("META_API_KEY", "MODEL_API_KEY", "META_MODEL_API_KEY")
 # Minted subscription token from other plugins. Never forward it.
 BLOCKED_ENV = ("MUSE_CODE_SUB_TOKEN",)
+# Child process gets this set only. Reviewer list: no TERM, no SHELL, no provider keys.
+_ALLOW_EXACT = frozenset({"PATH", "HOME", "USER", "TMPDIR", "LANG"})
 APPROVAL_MODES = ("denyUnmatched", "allowAll")
 DENY_DECISIONS = ("denied", "deniedPolicyAmendment", "abort")
 ALLOW_DECISION = "approved"
@@ -51,29 +53,44 @@ def uuid7() -> str:
     return f"{h[:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:]}"
 
 
-def _api_key(base: dict[str, str]) -> str | None:
-    for key in API_KEY_ENV:
-        value = base.get(key)
+def resolve_api_key(getter: Callable[[str], str | None]) -> str | None:
+    """Hermes stores the Meta key as MODEL_API_KEY. The other two are aliases."""
+    for name in ("MODEL_API_KEY", "META_API_KEY", "META_MODEL_API_KEY"):
+        value = getter(name)
         if isinstance(value, str) and value.strip():
-            return value
+            return value.strip()
     return None
 
 
-def child_env(base: dict[str, str] | None = None, *, billing: str = "subscription") -> dict[str, str]:
-    """Build the muse child environment.
+def _allowed_env_key(key: str) -> bool:
+    if key in BLOCKED_ENV or key in API_KEY_ENV:
+        return False
+    return key in _ALLOW_EXACT or key.startswith("LC_") or key.startswith("XDG_")
 
-    subscription: drop API keys so the browser login is used.
-    api_key: set META_API_KEY from the parent environment. Muse has no
-    switch that uses the key only after the cap; a set key replaces the login.
+
+def child_env(
+    base: dict[str, str] | None = None,
+    *,
+    billing: str = "subscription",
+    api_key: str | None = None,
+) -> dict[str, str]:
+    """Build the muse child environment from an allowlist.
+
+    subscription: no API key, so the browser login is used.
+    api_key: set META_API_KEY from the explicit argument only. A key sitting
+    in the parent environment is not forwarded. Muse has no switch that uses
+    the key only after the cap; a set key replaces the login.
     """
     if billing not in ("subscription", "api_key"):
         raise MuseHarnessError("billing must be subscription or api_key")
     source = dict(base if base is not None else os.environ)
-    env = dict(source)
-    for key in (*BLOCKED_ENV, *API_KEY_ENV):
-        env.pop(key, None)
+    env = {
+        key: value
+        for key, value in source.items()
+        if _allowed_env_key(key) and isinstance(value, str)
+    }
     if billing == "api_key":
-        key = _api_key(source)
+        key = api_key.strip() if isinstance(api_key, str) else ""
         if not key:
             raise MuseHarnessError(
                 "subscription allowance is exhausted and no META_API_KEY or MODEL_API_KEY is set"
@@ -251,6 +268,8 @@ def run_turn(
     popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
     env: dict[str, str] | None = None,
     api_fallback: bool = True,
+    api_key: str | None = None,
+    api_key_provider: Callable[[], str | None] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(prompt, str) or not prompt.strip():
         raise MuseHarnessError("prompt is empty")
@@ -289,9 +308,20 @@ def run_turn(
             provider=provider,
             binary=binary,
             popen=popen,
-            env=child_env(parent, billing="api_key"),
+            env=child_env(parent, billing="api_key", api_key=_fallback_key(api_key, api_key_provider)),
             billing="api_key_fallback",
         )
+
+
+def _fallback_key(
+    api_key: str | None,
+    provider: Callable[[], str | None] | None,
+) -> str | None:
+    if api_key is not None:
+        return api_key
+    if provider is None:
+        return None
+    return provider()
 
 
 def _one_turn(
@@ -396,7 +426,7 @@ def _one_turn(
 
     try:
         init_id = send_request("initialize", {
-            "clientInfo": {"name": "hermes_muse_harness", "version": "0.1.1"},
+            "clientInfo": {"name": "hermes_muse_harness", "version": "0.1.4"},
             "capabilities": {
                 "userInputDialogs": False,
                 "requestedCapabilities": ["sessionMcp"],

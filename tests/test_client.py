@@ -39,14 +39,74 @@ class ClientTests(unittest.TestCase):
         self.assertNotIn("META_API_KEY", sub)
         self.assertNotIn("MODEL_API_KEY", sub)
         self.assertNotIn("MUSE_CODE_SUB_TOKEN", sub)
-        fallback = child_env(base, billing="api_key")
+        fallback = child_env(base, billing="api_key", api_key="meta-secret")
         self.assertEqual(fallback["META_API_KEY"], "meta-secret")
         self.assertNotIn("MUSE_CODE_SUB_TOKEN", fallback)
         self.assertNotIn("MODEL_API_KEY", fallback)
 
-    def test_fallback_uses_model_api_key_when_meta_key_absent(self):
-        env = child_env({"MODEL_API_KEY": "from-hermes"}, billing="api_key")
-        self.assertEqual(env["META_API_KEY"], "from-hermes")
+    def test_child_env_copies_allowlist_and_drops_foreign_secrets(self):
+        base = {
+            "PATH": "/usr/bin",
+            "HOME": "/Users/auston",
+            "USER": "auston",
+            "LANG": "en_US.UTF-8",
+            "LC_ALL": "en_US.UTF-8",
+            "LC_CTYPE": "UTF-8",
+            "TMPDIR": "/tmp",
+            "XDG_CONFIG_HOME": "/Users/auston/.config",
+            "TERM": "xterm",
+            "SHELL": "/bin/zsh",
+            "OPENAI_API_KEY": "sk-other",
+            "TELEGRAM_BOT_TOKEN": "bot",
+            "MUSE_CODE_SUB_TOKEN": "minted",
+            "META_API_KEY": "meta-secret",
+        }
+        env = child_env(base, billing="subscription")
+        self.assertEqual(env["PATH"], "/usr/bin")
+        self.assertEqual(env["HOME"], "/Users/auston")
+        self.assertEqual(env["USER"], "auston")
+        self.assertEqual(env["LANG"], "en_US.UTF-8")
+        self.assertEqual(env["LC_ALL"], "en_US.UTF-8")
+        self.assertEqual(env["LC_CTYPE"], "UTF-8")
+        self.assertEqual(env["TMPDIR"], "/tmp")
+        self.assertEqual(env["XDG_CONFIG_HOME"], "/Users/auston/.config")
+        self.assertNotIn("TERM", env)
+        self.assertNotIn("SHELL", env)
+        self.assertNotIn("OPENAI_API_KEY", env)
+        self.assertNotIn("TELEGRAM_BOT_TOKEN", env)
+        self.assertNotIn("MUSE_CODE_SUB_TOKEN", env)
+        self.assertNotIn("META_API_KEY", env)
+
+    def test_fallback_key_is_the_argument_not_the_parent_dict(self):
+        base = {
+            "PATH": "/usr/bin",
+            "META_API_KEY": "from-parent",
+            "MODEL_API_KEY": "also-parent",
+            "OPENAI_API_KEY": "nope",
+        }
+        env = child_env(base, billing="api_key", api_key="scoped-secret")
+        self.assertEqual(env["META_API_KEY"], "scoped-secret")
+        self.assertNotIn("MODEL_API_KEY", env)
+        self.assertNotIn("OPENAI_API_KEY", env)
+        with self.assertRaises(MuseHarnessError):
+            child_env(base, billing="api_key")
+
+    def test_resolve_api_key_prefers_hermes_name(self):
+        from client import resolve_api_key
+
+        store = {
+            "MODEL_API_KEY": "first",
+            "META_API_KEY": "second",
+            "META_MODEL_API_KEY": "third",
+        }
+        self.assertEqual(resolve_api_key(store.get), "first")
+        self.assertEqual(resolve_api_key({"META_API_KEY": " only "}.get), "only")
+        self.assertIsNone(resolve_api_key({}.get))
+
+    def test_fallback_ignores_a_key_sitting_in_the_parent_dict(self):
+        env = child_env({"PATH": "/usr/bin", "MODEL_API_KEY": "from-hermes"}, billing="api_key", api_key="scoped")
+        self.assertEqual(env["META_API_KEY"], "scoped")
+        self.assertNotIn("MODEL_API_KEY", env)
 
     def test_quota_signal_is_the_typed_field(self):
         self.assertTrue(is_quota_failure({
@@ -117,6 +177,11 @@ class ClientTests(unittest.TestCase):
         plugin.register(Ctx())
         self.assertIn(("tool", "muse_turn"), registered)
         self.assertIn(("command", "muse"), registered)
+        os.environ["MUSE_HARNESS_APPROVAL"] = "allowAll"
+        try:
+            self.assertEqual(plugin._approval(Ctx()), "denyUnmatched")
+        finally:
+            os.environ.pop("MUSE_HARNESS_APPROVAL", None)
 
 
 if __name__ == "__main__":

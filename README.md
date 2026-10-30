@@ -8,7 +8,7 @@ Read [DISCLAIMER.md](DISCLAIMER.md) before installing.
 
 ## Billing
 
-Subscription first. Muse uses `META_API_KEY` before a browser login, always, so the key is withheld on the first attempt. If the turn fails with MSP's typed `error.quota` object, and `META_API_KEY` or `MODEL_API_KEY` is set in the parent environment, the same prompt is retried once on pay-as-you-go. The result field `billing` is `subscription` or `api_key_fallback`.
+Subscription first. The first attempt does not pass an API key, so Muse uses the browser login. If the turn fails with MSP's typed `error.quota` object, the same prompt is retried once on pay-as-you-go. The key comes from Hermes secrets via `agent.secret_scope.get_secret`, in order: `MODEL_API_KEY`, `META_API_KEY`, `META_MODEL_API_KEY`. It is not read from the process environment. The child process receives an allowlist (`PATH`, `HOME`, `USER`, `LANG`, `LC_*`, `TMPDIR`, `XDG_*`) plus `META_API_KEY` on that retry only. The result field `billing` is `subscription` or `api_key_fallback`.
 
 `MUSE_CODE_SUB_TOKEN` is never forwarded.
 

@@ -1,5 +1,5 @@
 name: muse-harness
-version: 0.1.3
+version: 0.1.4
 description: Drive a local Muse Code session over MSP so Wonder Full can call MCP tools.
 author: Auston (SnoobieJunes)
 requires_hermes: ">=0.21.0"
@@ -8,4 +8,16 @@ provides_tools:
 config_schema:
   approval_mode:
     type: str
-    description: Muse tool approval. allowAll lets the Muse session use its own tools.
+    description: Muse tool approval. allowAll lets the Muse session use its own shell and file tools in the session directory without asking.
+  model_api_key:
+    type: secret
+    env: MODEL_API_KEY
+    description: Optional. Hermes name for the Meta key. Used only after the subscription allowance is exhausted, for one pay-as-you-go retry. Leave unset to stay on the Muse login.
+  meta_api_key:
+    type: secret
+    env: META_API_KEY
+    description: Optional alias for the same Meta key. Used only if MODEL_API_KEY is unset.
+  meta_model_api_key:
+    type: secret
+    env: META_MODEL_API_KEY
+    description: Optional alias for the same Meta key. Used only if the other two are unset.
